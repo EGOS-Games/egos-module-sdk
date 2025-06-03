@@ -52,11 +52,23 @@ class MQTTClient {
         });
 
         this.client.on('close', () => {
-            logger.warn('MQTT connection closed');
+            logger.warn('MQTT connection closed', {
+                clientId: this.clientId,
+                possibleCauses: [
+                    'Network connectivity issue',
+                    'Broker restart',
+                    'Duplicate client ID (another instance of this module started)',
+                    'Keepalive timeout'
+                ],
+                advice: 'Check for multiple instances of this module running with the same client ID'
+            });
         });
 
         this.client.on('disconnect', () => {
-            logger.warn('MQTT client disconnected');
+            logger.warn('MQTT client disconnected', {
+                clientId: this.clientId,
+                warning: 'If this happens repeatedly, check for duplicate module instances'
+            });
         });
 
         this.client.on('offline', () => {
