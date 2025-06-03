@@ -1,6 +1,6 @@
 // neopixel.js
-import { logger } from '../../../utils/logger.js';
-import NeopixelController from './neopixel-controller.js';
+const { logger } = require('../../../utils/logger');
+const NeopixelController = require('./NeopixelController');
 
 class Neopixel {
     /**
@@ -360,4 +360,4 @@ class Neopixel {
     }
 }
 
-export default Neopixel;
+module.exports = Neopixel;

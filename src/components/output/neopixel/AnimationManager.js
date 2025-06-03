@@ -540,4 +540,4 @@ class AnimationManager {
     }
 }
 
-export default AnimationManager;
+module.exports = AnimationManager;

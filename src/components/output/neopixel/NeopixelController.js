@@ -1,7 +1,7 @@
 // neopixel-controller.js
-import { ws281x, StripType } from 'piixel';
-import AnimationManager from './animation-manager.js';
-import { logger } from '../../../utils/logger.js';
+const { ws281x, StripType } = require('piixel');
+const AnimationManager = require('./AnimationManager');
+const { logger } = require('../../../utils/logger');
 
 class NeopixelController {
     /**
@@ -393,4 +393,4 @@ class NeopixelController {
     }
 }
 
-export default NeopixelController;
+module.exports = NeopixelController;
