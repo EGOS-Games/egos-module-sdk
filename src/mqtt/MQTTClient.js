@@ -30,7 +30,9 @@ class MQTTClient {
                 qos: 1,
                 retain: false
             },
-            keepalive: 10
+            keepalive: 30,  // Match broker expectation
+            connectTimeout: 30000,  // 30 seconds
+            reconnectPeriod: 1000   // 1 second between reconnect attempts
         });
 
         // Track client as resource
