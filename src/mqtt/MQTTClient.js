@@ -38,12 +38,27 @@ class MQTTClient {
 
         this.client.on('connect', () => {
             logger.info(`MQTT Connected: ${this.clientId}`);
-            this.registerDevices();
-            this.onConnect?.(this.clientId);
+            // Add a small delay to ensure connection is fully established
+            setTimeout(() => {
+                this.registerDevices();
+                this.onConnect?.(this.clientId);
+            }, 50);
         });
 
         this.client.on('error', (error) => {
             logger.error('MQTT connection error:', error);
+        });
+
+        this.client.on('close', () => {
+            logger.warn('MQTT connection closed');
+        });
+
+        this.client.on('disconnect', () => {
+            logger.warn('MQTT client disconnected');
+        });
+
+        this.client.on('offline', () => {
+            logger.warn('MQTT client offline');
         });
 
         this.client.on('message', (topic, message) => {
@@ -73,15 +88,42 @@ class MQTTClient {
     registerDevices() {
         try {
             this.client.publish('module/register', JSON.stringify(this.devices));
-            this.client.subscribe(`${this.clientId}/device/+/output`, (error) => {
-                if (error) {
-                    logger.error('Failed to subscribe to device/output:', error);
+            
+            // Add a small delay before subscribing to prevent connection issues
+            setTimeout(() => {
+                if (this.client && this.client.connected) {
+                    this.client.subscribe(`${this.clientId}/device/+/output`, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error('Failed to subscribe to device/output:', error);
+                            // Try individual subscriptions instead of wildcard
+                            this.subscribeIndividually();
+                        } else {
+                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/output`);
+                        }
+                    });
+                } else {
+                    logger.warn('Client not connected when trying to subscribe');
                 }
-            });
+            }, 100);
+            
             logger.info(`Registered ${this.devices.length} devices`);
         } catch (error) {
             logger.error('Error registering devices:', error);
         }
+    }
+
+    subscribeIndividually() {
+        // Fallback: subscribe to each device individually instead of using wildcard
+        this.devices.forEach(device => {
+            const topic = `${this.clientId}/device/${device.id}/output`;
+            this.client.subscribe(topic, { qos: 0 }, (error) => {
+                if (error) {
+                    logger.error(`Failed to subscribe to ${topic}:`, error);
+                } else {
+                    logger.info(`Successfully subscribed to ${topic}`);
+                }
+            });
+        });
     }
 
     onOutputMessage(deviceId, handler) {
