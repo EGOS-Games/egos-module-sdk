@@ -22,7 +22,7 @@ class QRInput extends SerialInput {
             ...options
         });
 
-        super.initialize();
+        // Don't auto-initialize in constructor - let the user call start()
     }
 }
 

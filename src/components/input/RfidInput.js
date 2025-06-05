@@ -15,6 +15,8 @@ class RfidReader extends PollingInput {
             reconnectDelay: options.reconnectDelay || 1000,
             ...options
         });
+
+        // Don't auto-start in constructor
     }
 
     /**
