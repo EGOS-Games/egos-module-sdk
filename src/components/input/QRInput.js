@@ -21,6 +21,8 @@ class QRInput extends SerialInput {
             },
             ...options
         });
+
+        super.initialize();
     }
 }
 
