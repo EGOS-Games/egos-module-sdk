@@ -38,6 +38,9 @@
     "dmx": "^0.2.5",
     "piixel": "^1.2.2"
   },
+  "overrides": {
+    "lru-cache": "^7.18.3"
+  },
   "devDependencies": {
     "eslint": "^8.57.0"
   },
