@@ -1,6 +1,6 @@
 {
   "name": "egos-module-sdk",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "SDK for building EGOS hardware modules with standardized components and utilities",
   "main": "src/index.js",
   "scripts": {
@@ -28,15 +28,8 @@
   "dependencies": {
     "mqtt": "^5.10.4",
     "winston": "^3.17.0",
-    "serialport": "^13.0.0",
-    "@serialport/parser-readline": "^13.0.0",
     "rpio": "^2.4.2",
-    "lru-cache": "^7.18.3",
-    "node-rfid": "^1.0.0",
-    "easymidi": "^2.0.0",
-    "uuid": "^9.0.0",
-    "dmx": "^0.2.5",
-    "piixel": "^1.2.2"
+    "lru-cache": "^7.18.3"
   },
   "overrides": {
     "lru-cache": "^7.18.3"
