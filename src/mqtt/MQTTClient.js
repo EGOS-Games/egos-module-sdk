@@ -1,5 +1,6 @@
 const mqtt = require('mqtt');
 const { logger } = require('../utils/logger');
+const LED = require("../components/output/LED");
 
 /**
  * Enhanced MQTT Client for EGOS modules
@@ -10,6 +11,7 @@ class MQTTClient {
         this.clientId = options.clientId || `device-${Math.random().toString(16).slice(2, 10)}`;
         this.brokerUrl = options.brokerUrl || 'mqtt://egos.local:1883';
         this.devices = options.devices || [];
+        this.ledPin = options.ledPin;
         this.messageHandlers = new Map();
         this.outputHandlers = new Map();
         this.onConnect = options.onConnect || (() => {});
@@ -17,6 +19,14 @@ class MQTTClient {
         // Resource tracking for cleanup
         this.resources = new Set();
         this.timers = new Set();
+
+        // Initialize LED if pin is provided
+        if (this.ledPin) {
+            this.led = new LED({ pin: this.ledPin });
+            this.resources.add(this.led);
+            // Start blinking to indicate connecting
+            this.led.blink(500); // Blink every 500ms
+        }
 
         this.connect();
     }
@@ -40,6 +50,13 @@ class MQTTClient {
 
         this.client.on('connect', () => {
             logger.info(`MQTT Connected: ${this.clientId}`);
+
+            // Stop blinking and turn LED solid on when connected
+            if (this.led) {
+                this.led.stopBlink();
+                this.led.turnOn();
+            }
+
             // Add a small delay to ensure connection is fully established
             setTimeout(() => {
                 this.registerDevices();
@@ -49,6 +66,10 @@ class MQTTClient {
 
         this.client.on('error', (error) => {
             logger.error('MQTT connection error:', error);
+            // Start blinking again on error
+            if (this.led) {
+                this.led.blink(200);
+            }
         });
 
         this.client.on('close', () => {
@@ -62,6 +83,11 @@ class MQTTClient {
                 ],
                 advice: 'Check for multiple instances of this module running with the same client ID'
             });
+
+            // Start blinking when connection is closed
+            if (this.led) {
+                this.led.blink(200);
+            }
         });
 
         this.client.on('disconnect', () => {
@@ -69,10 +95,28 @@ class MQTTClient {
                 clientId: this.clientId,
                 warning: 'If this happens repeatedly, check for duplicate module instances'
             });
+
+            // Start blinking when disconnected
+            if (this.led) {
+                this.led.blink(200);
+            }
         });
 
         this.client.on('offline', () => {
             logger.warn('MQTT client offline');
+
+            // Start blinking when offline
+            if (this.led) {
+                this.led.blink(200);
+            }
+        });
+
+        this.client.on('reconnect', () => {
+            logger.info('MQTT client attempting to reconnect');
+            // Ensure LED is blinking during reconnection attempts
+            if (this.led && !this.led.isBlinking) {
+                this.led.blink(500);
+            }
         });
 
         this.client.on('message', (topic, message) => {
@@ -184,6 +228,12 @@ class MQTTClient {
                 clearInterval(timer);
             }
             this.timers.clear();
+
+            // Clean up LED
+            if (this.led) {
+                this.led.cleanup();
+                logger.info('LED cleaned up successfully');
+            }
 
             // Clean up MQTT client
             if (this.client) {
