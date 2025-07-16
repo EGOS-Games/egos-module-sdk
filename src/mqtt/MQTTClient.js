@@ -135,7 +135,7 @@ class MQTTClient {
 
                     return;
                 }
-
+                logger.info(`Received message to ${topic}:`, { topic, message, callback: this.onMessageReceived });
                 this.onMessageReceived?.(topic, payload);
 
                 const handler = this.messageHandlers.get(topic);
@@ -218,12 +218,13 @@ class MQTTClient {
 
     publish(topic, message, deviceId) {
         try {
+            logger.info("PUBLISHING MESSAGE", { topic, message, deviceId });
             if (typeof message === 'object') {
                 message = JSON.stringify(message);
             }
-            this.client.publish(topic, message);
-            console.log(`Published message to ${topic}:`, { topic, message, deviceId, callback: this.onMessageSent });
+            logger.info(`Published message to ${topic}:`, { topic, message, deviceId, callback: this.onMessageSent });
             this.onMessageSent?.(topic, message, deviceId);
+            this.client.publish(topic, message);
         } catch (error) {
             logger.error('Error publishing message:', error);
         }
