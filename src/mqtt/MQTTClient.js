@@ -200,6 +200,7 @@ class MQTTClient {
     }
 
     publishInputMessage(deviceId, message) {
+        logger.info("Publishing input message", { deviceId, message });
         this.publish(`${this.clientId}/device/${deviceId}/input`, message, deviceId);
     }
 
