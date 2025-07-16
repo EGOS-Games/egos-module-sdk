@@ -15,6 +15,8 @@ class MQTTClient {
         this.messageHandlers = new Map();
         this.outputHandlers = new Map();
         this.onConnect = options.onConnect || (() => {});
+        this.onMessageReceived = options.onMessageReceived || (() => {});
+        this.onMessageSent = options.onMessageSent || (() => {});
         
         // Resource tracking for cleanup
         this.resources = new Set();
@@ -123,6 +125,8 @@ class MQTTClient {
             try {
                 const payload = JSON.parse(message.toString());
 
+                this.onMessageReceived?.(topic, payload);
+
                 // Handle output messages
                 if (topic.endsWith('/output')) {
                     const deviceId = topic.split('/')[2];
@@ -215,6 +219,7 @@ class MQTTClient {
                 message = JSON.stringify(message);
             }
             this.client.publish(topic, message);
+            this.onMessageSent?.(topic, message);
         } catch (error) {
             logger.error('Error publishing message:', error);
         }
