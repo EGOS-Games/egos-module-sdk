@@ -7,7 +7,7 @@ const winston = require('winston');
 
 const createLogger = (options = {}) => {
     const defaultOptions = {
-        level: process.env.LOG_LEVEL || 'info',
+        level: process.env.LOG_LEVEL || 'debug',
         component: options.component || 'module',
         enableFile: options.enableFile !== false,
         logDir: options.logDir || './logs',

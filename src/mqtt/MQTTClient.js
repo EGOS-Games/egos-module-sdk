@@ -51,7 +51,7 @@ class MQTTClient {
         this.resources.add(this.client);
 
         this.client.on('connect', () => {
-            logger.info(`MQTT Connected: ${this.clientId}`);
+            logger.info(`MQTT Connected! ${this.clientId}`);
 
             // Stop blinking and turn LED solid on when connected
             if (this.led) {
@@ -209,6 +209,7 @@ class MQTTClient {
     }
 
     publishDeviceStateMessage(deviceId, state) {
+        logger.info("Publishing device state message", { deviceId, state });
         this.publish(
             `${this.clientId}/device/${deviceId}/state`, {
                 moduleId: this.clientId,
