@@ -125,16 +125,19 @@ class MQTTClient {
             try {
                 const payload = JSON.parse(message.toString());
 
-                this.onMessageReceived?.(topic, payload);
-
                 // Handle output messages
                 if (topic.endsWith('/output')) {
                     const deviceId = topic.split('/')[2];
+
                     logger.debug("Got output message:", { deviceId, payload });
+                    this.onMessageReceived?.(topic, payload, deviceId);
                     this.outputHandlers.get(deviceId)?.(payload);
+
                     return;
                 }
-                
+
+                this.onMessageReceived?.(topic, payload);
+
                 const handler = this.messageHandlers.get(topic);
                 if (handler) {
                     handler(payload);
@@ -197,11 +200,11 @@ class MQTTClient {
     }
 
     publishInputMessage(deviceId, message) {
-        this.publish(`${this.clientId}/device/${deviceId}/input`, message);
+        this.publish(`${this.clientId}/device/${deviceId}/input`, message, deviceId);
     }
 
     publishOutputErrorMessage(deviceId, message) {
-        this.publish(`${this.clientId}/device/${deviceId}/output/error`, message);
+        this.publish(`${this.clientId}/device/${deviceId}/output/error`, message, deviceId);
     }
 
     publishDeviceStateMessage(deviceId, state) {
@@ -210,16 +213,16 @@ class MQTTClient {
                 moduleId: this.clientId,
                 deviceId,
                 state
-            });
+            }, deviceId);
     }
 
-    publish(topic, message) {
+    publish(topic, message, deviceId) {
         try {
             if (typeof message === 'object') {
                 message = JSON.stringify(message);
             }
             this.client.publish(topic, message);
-            this.onMessageSent?.(topic, message);
+            this.onMessageSent?.(topic, message, deviceId);
         } catch (error) {
             logger.error('Error publishing message:', error);
         }
