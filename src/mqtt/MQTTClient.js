@@ -222,6 +222,7 @@ class MQTTClient {
                 message = JSON.stringify(message);
             }
             this.client.publish(topic, message);
+            console.log(`Published message to ${topic}:`, { topic, message, deviceId, callback: this.onMessageSent });
             this.onMessageSent?.(topic, message, deviceId);
         } catch (error) {
             logger.error('Error publishing message:', error);
