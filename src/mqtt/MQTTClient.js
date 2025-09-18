@@ -14,6 +14,7 @@ class MQTTClient {
         this.ledPin = options.ledPin;
         this.messageHandlers = new Map();
         this.outputHandlers = new Map();
+        this.configurationHandlers = new Map();
         this.onConnect = options.onConnect || (() => {});
         this.onMessageReceived = options.onMessageReceived || (() => {});
         this.onMessageSent = options.onMessageSent || (() => {});
@@ -135,6 +136,17 @@ class MQTTClient {
 
                     return;
                 }
+
+                // Handle configuration messages
+                if (topic.endsWith('/configuration')) {
+                    const deviceId = topic.split('/')[2];
+
+                    logger.debug("Got configuration message:", { deviceId, payload });
+                    this.onMessageReceived?.(topic, payload, deviceId);
+                    this.configurationHandlers.get(deviceId)?.(payload);
+
+                    return;
+                }
                 this.onMessageReceived?.(topic, payload);
 
                 const handler = this.messageHandlers.get(topic);
@@ -156,6 +168,7 @@ class MQTTClient {
             // Add a small delay before subscribing to prevent connection issues
             setTimeout(() => {
                 if (this.client && this.client.connected) {
+                    // Subscribe to output messages
                     this.client.subscribe(`${this.clientId}/device/+/output`, { qos: 0 }, (error) => {
                         if (error) {
                             logger.error('Failed to subscribe to device/output:', error);
@@ -163,6 +176,17 @@ class MQTTClient {
                             this.subscribeIndividually();
                         } else {
                             logger.info(`Successfully subscribed to ${this.clientId}/device/+/output`);
+                        }
+                    });
+
+                    // Subscribe to configuration messages
+                    this.client.subscribe(`${this.clientId}/device/+/configuration`, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error('Failed to subscribe to device/configuration:', error);
+                            // Try individual subscriptions instead of wildcard
+                            this.subscribeIndividually();
+                        } else {
+                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/configuration`);
                         }
                     });
                 } else {
@@ -179,12 +203,23 @@ class MQTTClient {
     subscribeIndividually() {
         // Fallback: subscribe to each device individually instead of using wildcard
         this.devices.forEach(device => {
-            const topic = `${this.clientId}/device/${device.id}/output`;
-            this.client.subscribe(topic, { qos: 0 }, (error) => {
+            // Subscribe to output messages
+            const outputTopic = `${this.clientId}/device/${device.id}/output`;
+            this.client.subscribe(outputTopic, { qos: 0 }, (error) => {
                 if (error) {
-                    logger.error(`Failed to subscribe to ${topic}:`, error);
+                    logger.error(`Failed to subscribe to ${outputTopic}:`, error);
                 } else {
-                    logger.info(`Successfully subscribed to ${topic}`);
+                    logger.info(`Successfully subscribed to ${outputTopic}`);
+                }
+            });
+
+            // Subscribe to configuration messages
+            const configTopic = `${this.clientId}/device/${device.id}/configuration`;
+            this.client.subscribe(configTopic, { qos: 0 }, (error) => {
+                if (error) {
+                    logger.error(`Failed to subscribe to ${configTopic}:`, error);
+                } else {
+                    logger.info(`Successfully subscribed to ${configTopic}`);
                 }
             });
         });
@@ -192,6 +227,10 @@ class MQTTClient {
 
     onOutputMessage(deviceId, handler) {
         this.outputHandlers.set(deviceId, handler);
+    }
+
+    onConfigurationMessage(deviceId, handler) {
+        this.configurationHandlers.set(deviceId, handler);
     }
 
     onMessage(topic, handler) {
