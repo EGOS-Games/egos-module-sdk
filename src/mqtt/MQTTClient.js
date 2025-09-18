@@ -138,7 +138,7 @@ class MQTTClient {
                 }
 
                 // Handle configuration messages
-                if (topic.endsWith('/configuration')) {
+                if (topic.endsWith('/configuration/set')) {
                     const deviceId = topic.split('/')[2];
 
                     logger.debug("Got configuration message:", { deviceId, payload });
@@ -180,13 +180,13 @@ class MQTTClient {
                     });
 
                     // Subscribe to configuration messages
-                    this.client.subscribe(`${this.clientId}/device/+/configuration`, { qos: 0 }, (error) => {
+                    this.client.subscribe(`${this.clientId}/device/+/configuration/set`, { qos: 0 }, (error) => {
                         if (error) {
                             logger.error('Failed to subscribe to device/configuration:', error);
                             // Try individual subscriptions instead of wildcard
                             this.subscribeIndividually();
                         } else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/configuration`);
+                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/configuration/set`);
                         }
                     });
                 } else {
