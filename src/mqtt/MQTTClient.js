@@ -149,6 +149,9 @@ class MQTTClient {
                 }
                 this.onMessageReceived?.(topic, payload);
 
+                if(!topic)
+                    return;
+
                 const handler = this.messageHandlers.get(topic);
                 if (handler) {
                     handler(payload);
