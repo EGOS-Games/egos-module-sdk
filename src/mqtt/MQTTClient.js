@@ -61,8 +61,8 @@ class MQTTClient {
             }
 
             // Add a small delay to ensure connection is fully established
-            setTimeout(() => {
-                this.registerDevices();
+            setTimeout(async () => {
+                await this.registerDevices();
                 this.onConnect?.(this.clientId);
             }, 50);
         });
@@ -164,65 +164,52 @@ class MQTTClient {
         });
     }
 
-    registerDevices() {
+    async registerDevices() {
         try {
+            if (!this.client || !this.client.connected) {
+                logger.warn('Client not connected when trying to register devices');
+                return;
+            }
+
+            // Define all topics to subscribe to
+            const subscriptionTopics = [
+                `${this.clientId}/device/+/output`,
+                `${this.clientId}/device/+/configuration/set`,
+                `${this.clientId}/credentials/set`,
+                `${this.clientId}/credentials/reset`,
+                `${this.clientId}/controller/token`
+            ];
+
+            // Subscribe to all topics and wait for confirmation
+            logger.info('Subscribing to all topics before registering...');
+            const subscriptionPromises = subscriptionTopics.map(topic => {
+                return new Promise((resolve, reject) => {
+                    this.client.subscribe(topic, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error(`Failed to subscribe to ${topic}:`, error);
+                            reject(error);
+                        } else {
+                            logger.info(`Successfully subscribed to ${topic}`);
+                            resolve(topic);
+                        }
+                    });
+                });
+            });
+
+            // Wait for all subscriptions to complete
+            try {
+                await Promise.all(subscriptionPromises);
+                logger.info('All subscriptions confirmed, now registering devices...');
+            } catch (subscriptionError) {
+                logger.error('Some subscriptions failed, trying individual subscriptions:', subscriptionError);
+                // Fallback to individual device subscriptions
+                this.subscribeIndividually();
+            }
+
+            // Only publish module/register after all subscriptions are active
             this.client.publish('module/register', JSON.stringify(this.devices));
-            
-            // Add a small delay before subscribing to prevent connection issues
-            setTimeout(() => {
-                if (this.client && this.client.connected) {
-                    // Subscribe to output messages
-                    this.client.subscribe(`${this.clientId}/device/+/output`, { qos: 0 }, (error) => {
-                        if (error) {
-                            logger.error('Failed to subscribe to device/output:', error);
-                            // Try individual subscriptions instead of wildcard
-                            this.subscribeIndividually();
-                        } else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/output`);
-                        }
-                    });
-
-                    // Subscribe to configuration messages
-                    this.client.subscribe(`${this.clientId}/device/+/configuration/set`, { qos: 0 }, (error) => {
-                        if (error) {
-                            logger.error('Failed to subscribe to device/configuration:', error);
-                            // Try individual subscriptions instead of wildcard
-                            this.subscribeIndividually();
-                        } else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/device/+/configuration/set`);
-                        }
-                    });
-
-                    this.client.subscribe(`${this.clientId}/credentials/set`, { qos: 0 }, (error) => {
-                        if (error) {
-                            logger.error('Failed to subscribe to credentials/set:', error);
-                        }
-                        else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/credentials/set`);
-                        }
-                    });
-                    this.client.subscribe(`${this.clientId}/credentials/reset`, { qos: 0 }, (error) => {
-                        if (error) {
-                            logger.error('Failed to subscribe to credentials/reset:', error);
-                        }
-                        else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/credentials/reset`);
-                        }
-                    });
-                    this.client.subscribe(`${this.clientId}/controller/token`, { qos: 0 }, (error) => {
-                        if (error) {
-                            logger.error('Failed to subscribe to controller/token:', error);
-                        }
-                        else {
-                            logger.info(`Successfully subscribed to ${this.clientId}/controller/token`);
-                        }
-                    });
-                } else {
-                    logger.warn('Client not connected when trying to subscribe');
-                }
-            }, 100);
-            
             logger.info(`Registered ${this.devices.length} devices`);
+            
         } catch (error) {
             logger.error('Error registering devices:', error);
         }
