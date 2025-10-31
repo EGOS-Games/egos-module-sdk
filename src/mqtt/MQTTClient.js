@@ -189,6 +189,31 @@ class MQTTClient {
                             logger.info(`Successfully subscribed to ${this.clientId}/device/+/configuration/set`);
                         }
                     });
+
+                    this.client.subscribe(`${this.clientId}/credentials/set`, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error('Failed to subscribe to credentials/set:', error);
+                        }
+                        else {
+                            logger.info(`Successfully subscribed to ${this.clientId}/credentials/set`);
+                        }
+                    });
+                    this.client.subscribe(`${this.clientId}/credentials/reset`, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error('Failed to subscribe to credentials/reset:', error);
+                        }
+                        else {
+                            logger.info(`Successfully subscribed to ${this.clientId}/credentials/reset`);
+                        }
+                    });
+                    this.client.subscribe(`${this.clientId}/controller/token`, { qos: 0 }, (error) => {
+                        if (error) {
+                            logger.error('Failed to subscribe to controller/token:', error);
+                        }
+                        else {
+                            logger.info(`Successfully subscribed to ${this.clientId}/controller/token`);
+                        }
+                    });
                 } else {
                     logger.warn('Client not connected when trying to subscribe');
                 }
