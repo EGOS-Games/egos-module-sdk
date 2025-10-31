@@ -1,6 +1,7 @@
 const mqtt = require('mqtt');
 const { logger } = require('../utils/logger');
 const LED = require("../components/output/LED");
+const WiFiManager = require('../wifi/WiFiManager');
 
 /**
  * Enhanced MQTT Client for EGOS modules
@@ -18,6 +19,9 @@ class MQTTClient {
         this.onConnect = options.onConnect || (() => {});
         this.onMessageReceived = options.onMessageReceived || (() => {});
         this.onMessageSent = options.onMessageSent || (() => {});
+        
+        // Initialize WiFi Manager for credential updates
+        this.wifiManager = new WiFiManager();
         
         // Resource tracking for cleanup
         this.resources = new Set();
@@ -147,6 +151,23 @@ class MQTTClient {
 
                     return;
                 }
+
+                // Handle credentials/set messages
+                if (topic.endsWith('/credentials/set')) {
+                    logger.info("Received credentials/set message");
+                    this.onMessageReceived?.(topic, payload);
+                    this.handleCredentialsSet(payload);
+                    return;
+                }
+
+                // Handle credentials/reset messages
+                if (topic.endsWith('/credentials/reset')) {
+                    logger.info("Received credentials/reset message");
+                    this.onMessageReceived?.(topic, payload);
+                    this.handleCredentialsReset();
+                    return;
+                }
+
                 this.onMessageReceived?.(topic, payload);
 
                 if(!topic)
@@ -238,6 +259,101 @@ class MQTTClient {
                 }
             });
         });
+    }
+
+    /**
+     * Handle credentials/set message from the controller
+     * Updates WiFi credentials if SSID is different from current
+     * @param {Object} payload - Message payload containing ssid and password
+     */
+    async handleCredentialsSet(payload) {
+        try {
+            const { ssid, password } = payload;
+
+            // Validate payload
+            if (!ssid || !password) {
+                logger.error('Invalid credentials payload: missing ssid or password');
+                return;
+            }
+
+            logger.info(`Processing credentials/set for SSID: ${ssid}`);
+
+            // Update credentials (WiFiManager will check if SSID is different)
+            const credentialsChanged = await this.wifiManager.updateCredentials(ssid, password);
+
+            if (credentialsChanged) {
+                logger.info('WiFi credentials changed, rebooting device...');
+                
+                // Publish acknowledgment before rebooting
+                this.publish(`${this.clientId}/credentials/updated`, {
+                    ssid: ssid,
+                    status: 'success',
+                    message: 'Credentials updated, rebooting...'
+                });
+
+                // Give time for the message to be sent before rebooting
+                await this.wifiManager.rebootDevice(3000);
+            } else {
+                logger.info('SSID unchanged, no reboot needed');
+                
+                // Publish acknowledgment that no change was needed
+                this.publish(`${this.clientId}/credentials/unchanged`, {
+                    ssid: ssid,
+                    status: 'unchanged',
+                    message: 'SSID already configured'
+                });
+            }
+        } catch (error) {
+            logger.error('Error handling credentials/set:', error);
+            
+            // Publish error message
+            this.publish(`${this.clientId}/credentials/error`, {
+                status: 'error',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Handle credentials/reset message from the controller
+     * Resets WiFi credentials to default (egos/egosegos) and reboots
+     */
+    async handleCredentialsReset() {
+        try {
+            logger.info('Processing credentials/reset to default');
+
+            // Reset to default credentials
+            const credentialsChanged = await this.wifiManager.resetToDefault();
+
+            if (credentialsChanged) {
+                logger.info('WiFi credentials reset to default, rebooting device...');
+                
+                // Publish acknowledgment before rebooting
+                this.publish(`${this.clientId}/credentials/reset`, {
+                    status: 'success',
+                    message: 'Credentials reset to default, rebooting...'
+                });
+
+                // Give time for the message to be sent before rebooting
+                await this.wifiManager.rebootDevice(3000);
+            } else {
+                logger.info('Already using default credentials, no reboot needed');
+                
+                // Publish acknowledgment that no change was needed
+                this.publish(`${this.clientId}/credentials/unchanged`, {
+                    status: 'unchanged',
+                    message: 'Already using default credentials'
+                });
+            }
+        } catch (error) {
+            logger.error('Error handling credentials/reset:', error);
+            
+            // Publish error message
+            this.publish(`${this.clientId}/credentials/error`, {
+                status: 'error',
+                message: error.message
+            });
+        }
     }
 
     onOutputMessage(deviceId, handler) {
