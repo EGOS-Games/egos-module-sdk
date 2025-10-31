@@ -156,7 +156,7 @@ class MQTTClient {
                 if (handler) {
                     handler(payload);
                 } else {
-                    logger.warn('Unable to find MQTT Message handler for topic:', topic);
+                    logger.warn(`Unable to find MQTT Message handler for topic: ${topic}`);
                 }
             } catch (error) {
                 logger.error('Error handling MQTT message:', error);
