@@ -84,8 +84,9 @@ class WiFiManager {
      */
     async _getCurrentSSIDFromNetworkManager() {
         try {
-            const content = await fs.readFile(this.networkManagerPath, 'utf8');
-            const match = content.match(/^ssid=(.+)$/m);
+            // Use sudo to read the file since it requires elevated permissions
+            const { stdout } = await execAsync(`sudo cat ${this.networkManagerPath}`);
+            const match = stdout.match(/^ssid=(.+)$/m);
             
             if (match && match[1]) {
                 const ssid = match[1].trim();
@@ -107,8 +108,9 @@ class WiFiManager {
      */
     async _getCurrentSSIDFromWpaSupplicant() {
         try {
-            const content = await fs.readFile(this.wpaSupplicantPath, 'utf8');
-            const match = content.match(/ssid="([^"]+)"/);
+            // Use sudo to read the file since it requires elevated permissions
+            const { stdout } = await execAsync(`sudo cat ${this.wpaSupplicantPath}`);
+            const match = stdout.match(/ssid="([^"]+)"/);
             
             if (match && match[1]) {
                 const ssid = match[1];
@@ -208,8 +210,8 @@ class WiFiManager {
             // Generate PSK
             const psk = await this.generatePSK(ssid, password);
             
-            // Read current configuration
-            const content = await fs.readFile(this.networkManagerPath, 'utf8');
+            // Read current configuration using sudo
+            const { stdout: content } = await execAsync(`sudo cat ${this.networkManagerPath}`);
             
             // Update SSID in [wifi] section
             let updatedContent = content.replace(
@@ -223,22 +225,27 @@ class WiFiManager {
                 `psk=${psk}`
             );
             
-            // Create backup
+            // Create backup using sudo
             const backupPath = `${this.networkManagerPath}.backup`;
-            await fs.writeFile(backupPath, content);
+            await execAsync(`sudo cp ${this.networkManagerPath} ${backupPath}`);
             logger.debug('Created backup of NetworkManager configuration');
             
-            // Write new configuration
-            await fs.writeFile(this.networkManagerPath, updatedContent);
+            // Write new configuration using sudo
+            // First create a temp file that doesn't require sudo
+            const tempPath = '/tmp/egos-wifi-config.tmp';
+            await fs.writeFile(tempPath, updatedContent);
             
-            // Set proper permissions (600 - owner read/write only)
-            await fs.chmod(this.networkManagerPath, 0o600);
+            // Move temp file to actual location with sudo
+            await execAsync(`sudo mv ${tempPath} ${this.networkManagerPath}`);
+            
+            // Set proper permissions (600 - owner read/write only) using sudo
+            await execAsync(`sudo chmod 600 ${this.networkManagerPath}`);
             
             logger.info('NetworkManager configuration updated');
             
             // Restart NetworkManager to apply changes
             try {
-                await execAsync('systemctl restart NetworkManager');
+                await execAsync('sudo systemctl restart NetworkManager');
                 logger.info('NetworkManager restarted');
             } catch (restartError) {
                 logger.warn('Could not restart NetworkManager, changes may require manual restart:', restartError);
@@ -258,8 +265,8 @@ class WiFiManager {
             // Generate PSK for wpa_supplicant
             const psk = await this.generatePSK(ssid, password);
             
-            // Read current configuration
-            const content = await fs.readFile(this.wpaSupplicantPath, 'utf8');
+            // Read current configuration using sudo
+            const { stdout: content } = await execAsync(`sudo cat ${this.wpaSupplicantPath}`);
             
             // Create the new network block
             const newNetworkBlock = `
@@ -281,22 +288,27 @@ network={
                 updatedContent = content + '\n' + newNetworkBlock;
             }
             
-            // Create backup
+            // Create backup using sudo
             const backupPath = `${this.wpaSupplicantPath}.backup`;
-            await fs.writeFile(backupPath, content);
+            await execAsync(`sudo cp ${this.wpaSupplicantPath} ${backupPath}`);
             logger.debug('Created backup of wpa_supplicant configuration');
             
-            // Write new configuration
-            await fs.writeFile(this.wpaSupplicantPath, updatedContent);
+            // Write new configuration using sudo
+            // First create a temp file that doesn't require sudo
+            const tempPath = '/tmp/egos-wpa-config.tmp';
+            await fs.writeFile(tempPath, updatedContent);
             
-            // Set proper permissions (600 - owner read/write only)
-            await fs.chmod(this.wpaSupplicantPath, 0o600);
+            // Move temp file to actual location with sudo
+            await execAsync(`sudo mv ${tempPath} ${this.wpaSupplicantPath}`);
+            
+            // Set proper permissions (600 - owner read/write only) using sudo
+            await execAsync(`sudo chmod 600 ${this.wpaSupplicantPath}`);
             
             logger.info('wpa_supplicant configuration updated');
             
             // Restart wpa_supplicant to apply changes
             try {
-                await execAsync('systemctl restart wpa_supplicant');
+                await execAsync('sudo systemctl restart wpa_supplicant');
                 logger.info('wpa_supplicant restarted');
             } catch (restartError) {
                 logger.warn('Could not restart wpa_supplicant, changes may require manual restart:', restartError);
