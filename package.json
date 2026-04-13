@@ -19,12 +19,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KevinMarzec/egos-module-sdk.git"
+    "url": "git+https://github.com/EGOS-Games/egos-module-sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/KevinMarzec/egos-module-sdk/issues"
+    "url": "https://github.com/EGOS-Games/egos-module-sdk/issues"
   },
-  "homepage": "https://github.com/KevinMarzec/egos-module-sdk#readme",
+  "homepage": "https://github.com/EGOS-Games/egos-module-sdk#readme",
   "dependencies": {
     "mqtt": "^5.10.4",
     "winston": "^3.17.0",

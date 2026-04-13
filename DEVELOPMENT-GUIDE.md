@@ -31,7 +31,7 @@ egos-module-sdk/
 
 1. **Set up the SDK project:**
    ```bash
-   cd D:\Repos\EGOS\Modules\egos-module-sdk
+   cd path/to/egos-module-sdk
    npm install
    ```
 
@@ -47,7 +47,7 @@ egos-module-sdk/
 
 3. **Install in your module:**
    ```bash
-   cd D:\Repos\EGOS\Modules\YOUR-MODULE
+   cd path/to/YOUR-MODULE
    npm install
    ```
 
@@ -55,13 +55,13 @@ egos-module-sdk/
 
 1. **Link the SDK globally:**
    ```bash
-   cd D:\Repos\EGOS\Modules\egos-module-sdk
+   cd path/to/egos-module-sdk
    npm link
    ```
 
 2. **Link in your module:**
    ```bash
-   cd D:\Repos\EGOS\Modules\YOUR-MODULE
+   cd path/to/YOUR-MODULE
    npm link egos-module-sdk
    ```
 
@@ -93,7 +93,7 @@ egos-module-sdk/
      "main": "src/index.js",
      "repository": {
        "type": "git",
-       "url": "git+https://github.com/YOUR-ORG/egos-module-sdk.git"
+       "url": "git+https://github.com/EGOS-Games/egos-module-sdk.git"
      },
      "keywords": ["egos", "hardware", "iot", "module"],
      "license": "MIT"
@@ -137,7 +137,7 @@ egos-module-sdk/
 
 2. **Publish to npm:**
    ```bash
-   cd D:\Repos\EGOS\Modules\egos-module-sdk
+   cd path/to/egos-module-sdk
    
    # For first publish
    npm publish
@@ -149,7 +149,7 @@ egos-module-sdk/
 
 3. **Publishing scoped packages (recommended):**
    ```bash
-   # Update package.json name to "@your-org/egos-module-sdk"
+   # Update package.json name to "@egos-games/egos-module-sdk"
    npm publish --access public
    ```
 
@@ -238,7 +238,7 @@ const {
 
 ```bash
 # Terminal 1: Your module
-cd D:\Repos\EGOS\Modules\YOUR-MODULE
+cd path/to/YOUR-MODULE
 node module-qr-rfid.js
 
 # Terminal 2: Monitor logs
@@ -311,7 +311,7 @@ node module-qr-rfid.js
 **Permission errors during npm publish:**
 - Check npm login: `npm whoami`
 - Verify package name availability
-- Use scoped packages: `@your-org/egos-module-sdk`
+- Use scoped packages: `@egos-games/egos-module-sdk`
 
 ### Getting Help
 
