@@ -2,6 +2,10 @@ const mqtt = require('mqtt');
 const { logger } = require('../utils/logger');
 const LED = require("../components/output/LED");
 const WiFiManager = require('../wifi/WiFiManager');
+const { ModuleSecretStore, defaultSecretFile } = require('./ModuleSecretStore');
+const { ModuleSecretAuth, isConnackRefusal } = require('./ModuleSecretAuth');
+
+const RECONNECT_PERIOD = 1000; // 1 second between reconnect attempts
 
 /**
  * Enhanced MQTT Client for EGOS modules
@@ -9,6 +13,9 @@ const WiFiManager = require('../wifi/WiFiManager');
  */
 class MQTTClient {
     constructor(options = {}) {
+        if (!options.clientId) {
+            logger.warn('No clientId given: a random id is used, so the controller gives this module a new secret on every start. Pass a stable clientId.');
+        }
         this.clientId = options.clientId || `device-${Math.random().toString(16).slice(2, 10)}`;
         this.brokerUrl = options.brokerUrl || 'mqtt://egos.local:1883';
         this.devices = options.devices || [];
@@ -19,6 +26,16 @@ class MQTTClient {
         this.onConnect = options.onConnect || (() => {});
         this.onMessageReceived = options.onMessageReceived || (() => {});
         this.onMessageSent = options.onMessageSent || (() => {});
+
+        // Module secret (protocol v1, egos-cloud#1197): proves this module's
+        // client id to the controller. Kept in its own file (option
+        // `secretFile`, default ~/.egos/module-secret-<clientId>).
+        this.secretAuth = new ModuleSecretAuth({
+            clientId: this.clientId,
+            store: new ModuleSecretStore({ filePath: options.secretFile || defaultSecretFile(this.clientId) }),
+            logger,
+            baseReconnectPeriod: RECONNECT_PERIOD
+        });
         
         // Initialize WiFi Manager for credential updates
         this.wifiManager = new WiFiManager();
@@ -39,8 +56,11 @@ class MQTTClient {
     }
 
     connect() {
+        const { username, password } = this.secretAuth.credentials();
         this.client = mqtt.connect(this.brokerUrl, {
             clientId: this.clientId,
+            username,
+            password,
             will: {
                 topic: 'client/disconnect',
                 payload: JSON.stringify({ id: this.clientId, status: 'disconnected' }),
@@ -49,7 +69,10 @@ class MQTTClient {
             },
             keepalive: 2,  // Reduced from 30 for faster disconnect detection (~3s timeout)
             connectTimeout: 30000,  // 30 seconds
-            reconnectPeriod: 1000   // 1 second between reconnect attempts
+            reconnectPeriod: RECONNECT_PERIOD,
+            // Keep reconnecting after a refused CONNACK (mqtt.js 5 stops by
+            // default); the error handler below picks the credentials first
+            reconnectOnConnackError: true
         });
 
         // Track client as resource
@@ -57,6 +80,7 @@ class MQTTClient {
 
         this.client.on('connect', () => {
             logger.info(`MQTT Connected! ${this.clientId}`);
+            this.secretAuth.handleConnected(this.client.options);
 
             // Stop blinking and turn LED solid on when connected
             if (this.led) {
@@ -73,6 +97,11 @@ class MQTTClient {
 
         this.client.on('error', (error) => {
             logger.error('MQTT connection error:', error);
+            // A refused CONNACK: mqtt.js reconnects after this handler, with
+            // the username, password and period in client.options
+            if (isConnackRefusal(error)) {
+                this.secretAuth.handleConnackError(error.code, this.client.options);
+            }
             // Start blinking again on error
             if (this.led) {
                 this.led.blink(200);
@@ -127,6 +156,17 @@ class MQTTClient {
         });
 
         this.client.on('message', (topic, message) => {
+            // The module secret: handled before anything that could log or
+            // pass on the payload
+            if (topic === this.secretAuth.topic) {
+                try {
+                    this.secretAuth.handleSecretMessage(message, this.client.options);
+                } catch (error) {
+                    logger.error('Error handling the module secret message', { error: error.message });
+                }
+                return;
+            }
+
             try {
                 const payload = JSON.parse(message.toString());
 
@@ -201,11 +241,16 @@ class MQTTClient {
                 `${this.clientId}/controller/token`
             ];
 
+            // The module secret topic is QoS 1 (protocol v1): the controller
+            // answers module/register on it
+            const qosByTopic = { [this.secretAuth.topic]: 1 };
+            subscriptionTopics.push(this.secretAuth.topic);
+
             // Subscribe to all topics and wait for confirmation
             logger.info('Subscribing to all topics before registering...');
             const subscriptionPromises = subscriptionTopics.map(topic => {
                 return new Promise((resolve, reject) => {
-                    this.client.subscribe(topic, { qos: 0 }, (error) => {
+                    this.client.subscribe(topic, { qos: qosByTopic[topic] ?? 0 }, (error) => {
                         if (error) {
                             logger.error(`Failed to subscribe to ${topic}:`, error);
                             reject(error);
@@ -225,6 +270,7 @@ class MQTTClient {
                 logger.error('Some subscriptions failed, trying individual subscriptions:', subscriptionError);
                 // Fallback to individual device subscriptions
                 this.subscribeIndividually();
+                await this.subscribeModuleSecret();
             }
 
             // Only publish module/register after all subscriptions are active
@@ -234,6 +280,20 @@ class MQTTClient {
         } catch (error) {
             logger.error('Error registering devices:', error);
         }
+    }
+
+    /** Subscribes to `{id}/module/secret` at QoS 1; resolves either way. */
+    subscribeModuleSecret() {
+        return new Promise((resolve) => {
+            this.client.subscribe(this.secretAuth.topic, { qos: 1 }, (error) => {
+                if (error) {
+                    logger.error(`Failed to subscribe to ${this.secretAuth.topic}:`, error);
+                } else {
+                    logger.info(`Successfully subscribed to ${this.secretAuth.topic}`);
+                }
+                resolve();
+            });
+        });
     }
 
     subscribeIndividually() {

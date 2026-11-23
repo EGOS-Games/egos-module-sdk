@@ -68,6 +68,25 @@ const rfidReader = new RfidReader({
 await rfidReader.start();
 ```
 
+## Module secret
+
+`MQTTClient` proves its client id to the venue controller with a secret the controller gives it the first time it registers ("module secrets, protocol v1", egos-cloud#1197; the controller side is described in egos-controller `docs/LOCAL-AUTH.md`).
+
+- It connects with username `module`. Without a stored secret the password is empty; it subscribes to `{clientId}/module/secret` (QoS 1) before `module/register`, and stores the secret the controller sends. The secret is used from the next connection.
+- The secret is kept in its own file, readable only by the module's user (mode 0600): the `secretFile` option, by default `~/.egos/module-secret-<clientId>`. It is never logged.
+- If the controller refuses the secret (CONNACK 4, someone pressed **Forget**), the file is deleted and the module connects without one, getting a new secret.
+- If the controller refuses an empty password (CONNACK 5), the id already has a secret this module lost (a reinstall, a deleted file). The module keeps retrying with backoff and logs a message: press **Forget** for the module in the controller's Settings > Paired devices.
+- Always pass a stable `clientId` (for example one built from the MAC address). Without one a random id is used, so the module would get a new secret, and a new identity, on every start.
+
+```javascript
+const client = new MQTTClient({
+    clientId: 'audio-a1b2c3',
+    brokerUrl: 'mqtt://egos.local:1883',
+    secretFile: '/var/lib/egos/module-secret',   // optional
+    devices
+});
+```
+
 ## Development Setup
 
 1. Clone the repository

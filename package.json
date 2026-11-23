@@ -4,7 +4,7 @@
   "description": "SDK for building EGOS hardware modules with standardized components and utilities",
   "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "egos",
