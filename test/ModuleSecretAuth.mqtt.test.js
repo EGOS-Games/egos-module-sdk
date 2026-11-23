@@ -1,14 +1,14 @@
-// Checks ModuleSecretAuth against the installed mqtt.js and a minimal fake
-// broker: that mqtt.js reconnects after a refused CONNACK when
-// reconnectOnConnackError is set, and that it sends the username and
-// password from client.options on every reconnect. Wired the same way as
-// src/mqtt/MQTTClient.js (which can't be loaded here: it needs rpio).
+// Runs connectModuleClient (the wiring MQTTClient uses) against the
+// installed mqtt.js and a minimal fake broker: mqtt.js reconnects after a
+// refused CONNACK only with reconnectOnConnackError, and sends the username
+// and password from client.options on every reconnect.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('net');
 const mqtt = require('mqtt');
 const mqttPacket = require('mqtt-packet');
 const { ModuleSecretAuth, isConnackRefusal } = require('../src/mqtt/ModuleSecretAuth');
+const { connectModuleClient } = require('../src/mqtt/connectModuleClient');
 
 const CLIENT_ID = 'audio-a1b2c3';
 const OLD_SECRET = 'o'.repeat(43);
@@ -82,26 +82,17 @@ function startBroker({ decide, secretPayload }) {
     });
 }
 
-function connectModule(port, auth) {
-    const { username, password } = auth.credentials();
-    const client = mqtt.connect(`mqtt://127.0.0.1:${port}`, {
+function connectModule(port, auth, onMessage) {
+    const client = connectModuleClient(mqtt, {
+        brokerUrl: `mqtt://127.0.0.1:${port}`,
         clientId: CLIENT_ID,
-        username,
-        password,
-        keepalive: 30,
-        connectTimeout: 5000,
-        reconnectPeriod: 50,
-        reconnectOnConnackError: true
-    });
-    client.on('error', (error) => {
-        if (isConnackRefusal(error)) auth.handleConnackError(error.code, client.options);
+        secretAuth: auth,
+        logger: silentLogger,
+        onMessage,
+        connectOptions: { keepalive: 30, connectTimeout: 5000, reconnectPeriod: auth.baseReconnectPeriod }
     });
     client.on('connect', () => {
-        auth.handleConnected(client.options);
         client.subscribe(auth.topic, { qos: 1 });
-    });
-    client.on('message', (topic, message) => {
-        if (topic === auth.topic) auth.handleSecretMessage(message, client.options);
     });
     return client;
 }
@@ -129,9 +120,12 @@ test('CONNACK 4 clears the stored secret; the module reconnects without one, sto
     });
     const store = memoryStore(OLD_SECRET);
     const auth = new ModuleSecretAuth({ clientId: CLIENT_ID, store, logger: silentLogger, baseReconnectPeriod: 50 });
-    const client = connectModule(broker.port, auth);
+    const forwarded = [];
+    const client = connectModule(broker.port, auth, (topic) => forwarded.push(topic));
     try {
         await waitFor(() => store.secret === NEW_SECRET);
+        // The secret message never reaches the module's own message handler
+        assert.deepEqual(forwarded, []);
         assert.deepEqual(broker.connects.slice(0, 2).map((c) => [c.username, c.password]), [['module', OLD_SECRET], ['module', '']]);
         assert.ok(broker.subscriptions.some((sub) => sub.topic === `${CLIENT_ID}/module/secret` && sub.qos === 1));
         // The new secret is not used by this connection, only by the next one
@@ -155,6 +149,24 @@ test('CONNACK 5 with an empty password keeps retrying with backoff', async () =>
         assert.ok(broker.connects.every((c) => c.username === 'module' && c.password === ''));
         assert.ok(client.options.reconnectPeriod >= 80);
         assert.equal(store.secret, null);
+    } finally {
+        client.end(true);
+        await broker.close();
+    }
+});
+
+test('mqtt.js reports a refused CONNACK in the form isConnackRefusal expects', async () => {
+    // isConnackRefusal relies on the message text "Connection refused..." and
+    // a numeric code; this fails if an mqtt.js upgrade changes either
+    const broker = await startBroker({ decide: () => 4 });
+    const client = mqtt.connect(`mqtt://127.0.0.1:${broker.port}`, {
+        clientId: CLIENT_ID, username: 'module', password: OLD_SECRET, reconnectPeriod: 0
+    });
+    try {
+        const error = await new Promise((resolve) => client.once('error', resolve));
+        assert.match(error.message, /^Connection refused/);
+        assert.equal(error.code, 4);
+        assert.equal(isConnackRefusal(error), true);
     } finally {
         client.end(true);
         await broker.close();

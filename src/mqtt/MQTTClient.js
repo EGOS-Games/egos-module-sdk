@@ -3,7 +3,8 @@ const { logger } = require('../utils/logger');
 const LED = require("../components/output/LED");
 const WiFiManager = require('../wifi/WiFiManager');
 const { ModuleSecretStore, defaultSecretFile } = require('./ModuleSecretStore');
-const { ModuleSecretAuth, isConnackRefusal } = require('./ModuleSecretAuth');
+const { ModuleSecretAuth } = require('./ModuleSecretAuth');
+const { connectModuleClient } = require('./connectModuleClient');
 
 const RECONNECT_PERIOD = 1000; // 1 second between reconnect attempts
 
@@ -56,23 +57,25 @@ class MQTTClient {
     }
 
     connect() {
-        const { username, password } = this.secretAuth.credentials();
-        this.client = mqtt.connect(this.brokerUrl, {
+        // Credentials, reconnects after a refused CONNACK and the
+        // {id}/module/secret message are handled in connectModuleClient
+        this.client = connectModuleClient(mqtt, {
+            brokerUrl: this.brokerUrl,
             clientId: this.clientId,
-            username,
-            password,
-            will: {
-                topic: 'client/disconnect',
-                payload: JSON.stringify({ id: this.clientId, status: 'disconnected' }),
-                qos: 1,
-                retain: false
-            },
-            keepalive: 2,  // Reduced from 30 for faster disconnect detection (~3s timeout)
-            connectTimeout: 30000,  // 30 seconds
-            reconnectPeriod: RECONNECT_PERIOD,
-            // Keep reconnecting after a refused CONNACK (mqtt.js 5 stops by
-            // default); the error handler below picks the credentials first
-            reconnectOnConnackError: true
+            secretAuth: this.secretAuth,
+            logger,
+            onMessage: (topic, message) => this.handleMessage(topic, message),
+            connectOptions: {
+                will: {
+                    topic: 'client/disconnect',
+                    payload: JSON.stringify({ id: this.clientId, status: 'disconnected' }),
+                    qos: 1,
+                    retain: false
+                },
+                keepalive: 2,  // Reduced from 30 for faster disconnect detection (~3s timeout)
+                connectTimeout: 30000,  // 30 seconds
+                reconnectPeriod: RECONNECT_PERIOD
+            }
         });
 
         // Track client as resource
@@ -80,7 +83,6 @@ class MQTTClient {
 
         this.client.on('connect', () => {
             logger.info(`MQTT Connected! ${this.clientId}`);
-            this.secretAuth.handleConnected(this.client.options);
 
             // Stop blinking and turn LED solid on when connected
             if (this.led) {
@@ -97,11 +99,6 @@ class MQTTClient {
 
         this.client.on('error', (error) => {
             logger.error('MQTT connection error:', error);
-            // A refused CONNACK: mqtt.js reconnects after this handler, with
-            // the username, password and period in client.options
-            if (isConnackRefusal(error)) {
-                this.secretAuth.handleConnackError(error.code, this.client.options);
-            }
             // Start blinking again on error
             if (this.led) {
                 this.led.blink(200);
@@ -154,75 +151,65 @@ class MQTTClient {
                 this.led.blink(500);
             }
         });
+    }
 
-        this.client.on('message', (topic, message) => {
-            // The module secret: handled before anything that could log or
-            // pass on the payload
-            if (topic === this.secretAuth.topic) {
-                try {
-                    this.secretAuth.handleSecretMessage(message, this.client.options);
-                } catch (error) {
-                    logger.error('Error handling the module secret message', { error: error.message });
-                }
+    /** Every message except the module secret (see connectModuleClient). */
+    handleMessage(topic, message) {
+        try {
+            const payload = JSON.parse(message.toString());
+
+            // Handle output messages
+            if (topic.endsWith('/output')) {
+                const deviceId = topic.split('/')[2];
+
+                logger.debug("Got output message:", { deviceId, payload });
+                this.onMessageReceived?.(topic, payload, deviceId);
+                this.outputHandlers.get(deviceId)?.(payload);
+
                 return;
             }
 
-            try {
-                const payload = JSON.parse(message.toString());
+            // Handle configuration messages
+            if (topic.endsWith('/configuration/set')) {
+                const deviceId = topic.split('/')[2];
 
-                // Handle output messages
-                if (topic.endsWith('/output')) {
-                    const deviceId = topic.split('/')[2];
+                logger.debug("Got configuration message:", { deviceId, payload });
+                this.onMessageReceived?.(topic, payload, deviceId);
+                this.configurationHandlers.get(deviceId)?.(payload);
 
-                    logger.debug("Got output message:", { deviceId, payload });
-                    this.onMessageReceived?.(topic, payload, deviceId);
-                    this.outputHandlers.get(deviceId)?.(payload);
-
-                    return;
-                }
-
-                // Handle configuration messages
-                if (topic.endsWith('/configuration/set')) {
-                    const deviceId = topic.split('/')[2];
-
-                    logger.debug("Got configuration message:", { deviceId, payload });
-                    this.onMessageReceived?.(topic, payload, deviceId);
-                    this.configurationHandlers.get(deviceId)?.(payload);
-
-                    return;
-                }
-
-                // Handle credentials/set messages
-                if (topic.endsWith('/credentials/set')) {
-                    logger.info("Received credentials/set message");
-                    this.onMessageReceived?.(topic, payload);
-                    this.handleCredentialsSet(payload);
-                    return;
-                }
-
-                // Handle credentials/reset messages
-                if (topic.endsWith('/credentials/reset')) {
-                    logger.info("Received credentials/reset message");
-                    this.onMessageReceived?.(topic, payload);
-                    this.handleCredentialsReset();
-                    return;
-                }
-
-                this.onMessageReceived?.(topic, payload);
-
-                if(!topic)
-                    return;
-
-                const handler = this.messageHandlers.get(topic);
-                if (handler) {
-                    handler(payload);
-                } else {
-                    logger.warn(`Unable to find MQTT Message handler for topic: ${topic}`);
-                }
-            } catch (error) {
-                logger.error('Error handling MQTT message:', error);
+                return;
             }
-        });
+
+            // Handle credentials/set messages
+            if (topic.endsWith('/credentials/set')) {
+                logger.info("Received credentials/set message");
+                this.onMessageReceived?.(topic, payload);
+                this.handleCredentialsSet(payload);
+                return;
+            }
+
+            // Handle credentials/reset messages
+            if (topic.endsWith('/credentials/reset')) {
+                logger.info("Received credentials/reset message");
+                this.onMessageReceived?.(topic, payload);
+                this.handleCredentialsReset();
+                return;
+            }
+
+            this.onMessageReceived?.(topic, payload);
+
+            if(!topic)
+                return;
+
+            const handler = this.messageHandlers.get(topic);
+            if (handler) {
+                handler(payload);
+            } else {
+                logger.warn(`Unable to find MQTT Message handler for topic: ${topic}`);
+            }
+        } catch (error) {
+            logger.error('Error handling MQTT message:', error);
+        }
     }
 
     async registerDevices() {

@@ -67,11 +67,42 @@ test('credentials: the stored secret as the password', () => {
     assert.deepEqual(auth.credentials(), { username: 'module', password: SECRET });
 });
 
-test('credentials: an unreadable store means connecting without a secret', () => {
-    const store = { load() { throw new Error('EACCES: permission denied'); } };
+test('credentials: an unreadable store means connecting without a secret, and says so', () => {
+    const store = {
+        filePath: '/home/pi/.egos/module-secret-audio-a1b2c3',
+        load() { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); }
+    };
     const { auth, logger } = makeAuth(store);
     assert.deepEqual(auth.credentials(), { username: 'module', password: '' });
     assert.equal(logger.lines[0].level, 'error');
+    assert.match(logger.lines[0].text, /module-secret-audio-a1b2c3 \(EACCES\)/);
+    assert.match(logger.lines[0].text, /permissions/);
+});
+
+test('CONNACK 5 after an unreadable store points at the file, not only at Forget', () => {
+    const store = {
+        filePath: '/home/pi/.egos/module-secret-audio-a1b2c3',
+        load() { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); }
+    };
+    const { auth, logger } = makeAuth(store);
+    const options = { ...auth.credentials(), reconnectPeriod: 1000 };
+    assert.equal(auth.handleConnackError(5, options), 'secret-required');
+    const last = logger.lines[logger.lines.length - 1].text;
+    assert.match(last, /could not be read \(EACCES\)/);
+    assert.match(last, /permissions/);
+});
+
+test('a secret message on a connection that already uses a secret is ignored', () => {
+    const store = memoryStore(SECRET);
+    const { auth, logger } = makeAuth(store);
+    const options = { username: 'module', password: SECRET };
+    const forged = 'F'.repeat(43);
+    assert.equal(auth.handleSecretMessage(JSON.stringify({ secret: forged, version: 1 }), options), false);
+    assert.equal(store.secret, SECRET);
+    assert.equal(options.password, SECRET);
+    assert.ok(logger.lines.some((line) => /already uses a secret/.test(line.text)));
+    assertNeverLogged(logger, forged);
+    assertNeverLogged(logger, SECRET);
 });
 
 test('parseSecretMessage takes only a valid v1 payload', () => {

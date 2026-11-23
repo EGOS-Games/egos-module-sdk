@@ -81,6 +81,13 @@ class ModuleSecretAuth {
         this.logger = logger;
         this.baseReconnectPeriod = baseReconnectPeriod;
         this.maxReconnectPeriod = maxReconnectPeriod;
+        // Why the last credentials() call couldn't read the store, or null
+        this.storeReadError = null;
+    }
+
+    /** The secret file, for log messages (the path, never the content). */
+    get storeName() {
+        return this.store.filePath || 'the module secret store';
     }
 
     /** The topic the controller sends this module's secret on. */
@@ -93,8 +100,15 @@ class ModuleSecretAuth {
         let secret = null;
         try {
             secret = this.store.load();
+            this.storeReadError = null;
         } catch (error) {
-            this.logger.error('Could not read the module secret; connecting without one', { error: error.message });
+            this.storeReadError = error.code || error.message;
+            this.logger.error(
+                `Could not read the module secret from ${this.storeName} (${this.storeReadError}); connecting without one. ` +
+                'If this module already has a secret, the controller will refuse it: fix the file\'s permissions or ownership ' +
+                'for the user running the module, rather than pressing "Forget" in the controller.',
+                { error: error.message }
+            );
         }
         return { username: MODULE_USERNAME, password: secret || '' };
     }
@@ -105,6 +119,13 @@ class ModuleSecretAuth {
      * secret was taken.
      */
     handleSecretMessage(message, options) {
+        // The controller issues a secret only to a connection without one, so
+        // a secret message on a connection that already uses a secret is not
+        // from the controller's protocol: never let it replace a working one
+        if (options.password !== '' && options.password !== undefined && options.password !== null) {
+            this.logger.warn('Ignored a module secret message: this connection already uses a secret');
+            return false;
+        }
         const secret = parseSecretMessage(message);
         if (!secret) {
             this.logger.warn('Ignored an invalid module secret message');
@@ -143,7 +164,14 @@ class ModuleSecretAuth {
             return action;
         }
         options.reconnectPeriod = nextReconnectPeriod(options.reconnectPeriod, this.baseReconnectPeriod, this.maxReconnectPeriod);
-        if (action === 'secret-required') {
+        if (action === 'secret-required' && this.storeReadError) {
+            this.logger.warn(
+                `The controller refused module id "${this.clientId}" (CONNACK 5): it has a secret for this module, but ` +
+                `${this.storeName} could not be read (${this.storeReadError}). Fix the file's permissions or ownership; ` +
+                'pressing "Forget" would also work but gives the module a new secret. ' +
+                `Retrying in ${options.reconnectPeriod / 1000}s.`
+            );
+        } else if (action === 'secret-required') {
             this.logger.warn(
                 `The controller refused module id "${this.clientId}" (CONNACK 5): it already has a secret this module doesn't hold, ` +
                 'for example after a reinstall. Press "Forget" for this module in the controller\'s Settings > Paired devices. ' +

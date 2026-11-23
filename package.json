@@ -26,7 +26,7 @@
   },
   "homepage": "https://github.com/EGOS-Games/egos-module-sdk#readme",
   "dependencies": {
-    "mqtt": "^5.10.4",
+    "mqtt": "^5.16.0",
     "winston": "^3.17.0",
     "rpio": "^2.4.2",
     "lru-cache": "^7.18.3"
@@ -35,7 +35,8 @@
     "lru-cache": "^7.18.3"
   },
   "devDependencies": {
-    "eslint": "^8.57.0"
+    "eslint": "^8.57.0",
+    "mqtt-packet": "^9.0.2"
   },
   "engines": {
     "node": ">=20.0.0"
