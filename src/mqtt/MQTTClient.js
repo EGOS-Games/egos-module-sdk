@@ -2,6 +2,11 @@ const mqtt = require('mqtt');
 const { logger } = require('../utils/logger');
 const LED = require("../components/output/LED");
 const WiFiManager = require('../wifi/WiFiManager');
+const { ModuleSecretStore, defaultSecretFile } = require('./ModuleSecretStore');
+const { ModuleSecretAuth } = require('./ModuleSecretAuth');
+const { connectModuleClient } = require('./connectModuleClient');
+
+const RECONNECT_PERIOD = 1000; // 1 second between reconnect attempts
 
 /**
  * Enhanced MQTT Client for EGOS modules
@@ -9,6 +14,9 @@ const WiFiManager = require('../wifi/WiFiManager');
  */
 class MQTTClient {
     constructor(options = {}) {
+        if (!options.clientId) {
+            logger.warn('No clientId given: a random id is used, so the controller gives this module a new secret on every start. Pass a stable clientId.');
+        }
         this.clientId = options.clientId || `device-${Math.random().toString(16).slice(2, 10)}`;
         this.brokerUrl = options.brokerUrl || 'mqtt://egos.local:1883';
         this.devices = options.devices || [];
@@ -19,6 +27,16 @@ class MQTTClient {
         this.onConnect = options.onConnect || (() => {});
         this.onMessageReceived = options.onMessageReceived || (() => {});
         this.onMessageSent = options.onMessageSent || (() => {});
+
+        // Module secret (protocol v1, egos-cloud#1197): proves this module's
+        // client id to the controller. Kept in its own file (option
+        // `secretFile`, default ~/.egos/module-secret-<clientId>).
+        this.secretAuth = new ModuleSecretAuth({
+            clientId: this.clientId,
+            store: new ModuleSecretStore({ filePath: options.secretFile || defaultSecretFile(this.clientId) }),
+            logger,
+            baseReconnectPeriod: RECONNECT_PERIOD
+        });
         
         // Initialize WiFi Manager for credential updates
         this.wifiManager = new WiFiManager();
@@ -39,17 +57,25 @@ class MQTTClient {
     }
 
     connect() {
-        this.client = mqtt.connect(this.brokerUrl, {
+        // Credentials, reconnects after a refused CONNACK and the
+        // {id}/module/secret message are handled in connectModuleClient
+        this.client = connectModuleClient(mqtt, {
+            brokerUrl: this.brokerUrl,
             clientId: this.clientId,
-            will: {
-                topic: 'client/disconnect',
-                payload: JSON.stringify({ id: this.clientId, status: 'disconnected' }),
-                qos: 1,
-                retain: false
-            },
-            keepalive: 2,  // Reduced from 30 for faster disconnect detection (~3s timeout)
-            connectTimeout: 30000,  // 30 seconds
-            reconnectPeriod: 1000   // 1 second between reconnect attempts
+            secretAuth: this.secretAuth,
+            logger,
+            onMessage: (topic, message) => this.handleMessage(topic, message),
+            connectOptions: {
+                will: {
+                    topic: 'client/disconnect',
+                    payload: JSON.stringify({ id: this.clientId, status: 'disconnected' }),
+                    qos: 1,
+                    retain: false
+                },
+                keepalive: 2,  // Reduced from 30 for faster disconnect detection (~3s timeout)
+                connectTimeout: 30000,  // 30 seconds
+                reconnectPeriod: RECONNECT_PERIOD
+            }
         });
 
         // Track client as resource
@@ -125,64 +151,65 @@ class MQTTClient {
                 this.led.blink(500);
             }
         });
+    }
 
-        this.client.on('message', (topic, message) => {
-            try {
-                const payload = JSON.parse(message.toString());
+    /** Every message except the module secret (see connectModuleClient). */
+    handleMessage(topic, message) {
+        try {
+            const payload = JSON.parse(message.toString());
 
-                // Handle output messages
-                if (topic.endsWith('/output')) {
-                    const deviceId = topic.split('/')[2];
+            // Handle output messages
+            if (topic.endsWith('/output')) {
+                const deviceId = topic.split('/')[2];
 
-                    logger.debug("Got output message:", { deviceId, payload });
-                    this.onMessageReceived?.(topic, payload, deviceId);
-                    this.outputHandlers.get(deviceId)?.(payload);
+                logger.debug("Got output message:", { deviceId, payload });
+                this.onMessageReceived?.(topic, payload, deviceId);
+                this.outputHandlers.get(deviceId)?.(payload);
 
-                    return;
-                }
-
-                // Handle configuration messages
-                if (topic.endsWith('/configuration/set')) {
-                    const deviceId = topic.split('/')[2];
-
-                    logger.debug("Got configuration message:", { deviceId, payload });
-                    this.onMessageReceived?.(topic, payload, deviceId);
-                    this.configurationHandlers.get(deviceId)?.(payload);
-
-                    return;
-                }
-
-                // Handle credentials/set messages
-                if (topic.endsWith('/credentials/set')) {
-                    logger.info("Received credentials/set message");
-                    this.onMessageReceived?.(topic, payload);
-                    this.handleCredentialsSet(payload);
-                    return;
-                }
-
-                // Handle credentials/reset messages
-                if (topic.endsWith('/credentials/reset')) {
-                    logger.info("Received credentials/reset message");
-                    this.onMessageReceived?.(topic, payload);
-                    this.handleCredentialsReset();
-                    return;
-                }
-
-                this.onMessageReceived?.(topic, payload);
-
-                if(!topic)
-                    return;
-
-                const handler = this.messageHandlers.get(topic);
-                if (handler) {
-                    handler(payload);
-                } else {
-                    logger.warn(`Unable to find MQTT Message handler for topic: ${topic}`);
-                }
-            } catch (error) {
-                logger.error('Error handling MQTT message:', error);
+                return;
             }
-        });
+
+            // Handle configuration messages
+            if (topic.endsWith('/configuration/set')) {
+                const deviceId = topic.split('/')[2];
+
+                logger.debug("Got configuration message:", { deviceId, payload });
+                this.onMessageReceived?.(topic, payload, deviceId);
+                this.configurationHandlers.get(deviceId)?.(payload);
+
+                return;
+            }
+
+            // Handle credentials/set messages
+            if (topic.endsWith('/credentials/set')) {
+                logger.info("Received credentials/set message");
+                this.onMessageReceived?.(topic, payload);
+                this.handleCredentialsSet(payload);
+                return;
+            }
+
+            // Handle credentials/reset messages
+            if (topic.endsWith('/credentials/reset')) {
+                logger.info("Received credentials/reset message");
+                this.onMessageReceived?.(topic, payload);
+                this.handleCredentialsReset();
+                return;
+            }
+
+            this.onMessageReceived?.(topic, payload);
+
+            if(!topic)
+                return;
+
+            const handler = this.messageHandlers.get(topic);
+            if (handler) {
+                handler(payload);
+            } else {
+                logger.warn(`Unable to find MQTT Message handler for topic: ${topic}`);
+            }
+        } catch (error) {
+            logger.error('Error handling MQTT message:', error);
+        }
     }
 
     async registerDevices() {
@@ -201,11 +228,16 @@ class MQTTClient {
                 `${this.clientId}/controller/token`
             ];
 
+            // The module secret topic is QoS 1 (protocol v1): the controller
+            // answers module/register on it
+            const qosByTopic = { [this.secretAuth.topic]: 1 };
+            subscriptionTopics.push(this.secretAuth.topic);
+
             // Subscribe to all topics and wait for confirmation
             logger.info('Subscribing to all topics before registering...');
             const subscriptionPromises = subscriptionTopics.map(topic => {
                 return new Promise((resolve, reject) => {
-                    this.client.subscribe(topic, { qos: 0 }, (error) => {
+                    this.client.subscribe(topic, { qos: qosByTopic[topic] ?? 0 }, (error) => {
                         if (error) {
                             logger.error(`Failed to subscribe to ${topic}:`, error);
                             reject(error);
@@ -225,6 +257,7 @@ class MQTTClient {
                 logger.error('Some subscriptions failed, trying individual subscriptions:', subscriptionError);
                 // Fallback to individual device subscriptions
                 this.subscribeIndividually();
+                await this.subscribeModuleSecret();
             }
 
             // Only publish module/register after all subscriptions are active
@@ -234,6 +267,20 @@ class MQTTClient {
         } catch (error) {
             logger.error('Error registering devices:', error);
         }
+    }
+
+    /** Subscribes to `{id}/module/secret` at QoS 1; resolves either way. */
+    subscribeModuleSecret() {
+        return new Promise((resolve) => {
+            this.client.subscribe(this.secretAuth.topic, { qos: 1 }, (error) => {
+                if (error) {
+                    logger.error(`Failed to subscribe to ${this.secretAuth.topic}:`, error);
+                } else {
+                    logger.info(`Successfully subscribed to ${this.secretAuth.topic}`);
+                }
+                resolve();
+            });
+        });
     }
 
     subscribeIndividually() {
